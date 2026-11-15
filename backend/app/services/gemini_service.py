@@ -33,12 +33,12 @@ class GeminiService:
         Takes user conversational input and extracts recommendations and cart actions based on menu.
         """
         menu_summary = "\n".join([
-            f"- {item['name']} (${item['price']:.2f}, Category: {item['category']}, Caffeine: {item['caffeine_level']}, Dietary: {item['dietary_tags']}, Vibe: {item['vibe_tags']}): {item['description']}"
+            f"- {item['name']} (INR {item['price']:.0f}, Category: {item['category']}, Caffeine: {item['caffeine_level']}, Dietary: {item['dietary_tags']}, Vibe: {item['vibe_tags']}): {item['description']}"
             for item in menu_items
         ])
 
         system_prompt = f"""
-You are the AI Café Concierge for 'The Café Companion', powered by Google Gemini.
+You are the AI Café Concierge in 'The Café Companion' app, serving guests at 'Third Wave Coffee', powered by Google Gemini.
 Your role is to help patrons order in plain conversational language, accommodate their dietary needs, and curate drinks/pastries based on their current vibe/goal.
 
 Current Patron Context:

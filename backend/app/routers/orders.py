@@ -5,6 +5,7 @@ import datetime
 from ..database import get_db
 from ..models import Order, OrderItem
 from ..schemas import OrderCreate, OrderResponse, OrderStatusUpdate
+from ..pricing import upgrade_legacy_demo_prices
 
 router = APIRouter(prefix="/api/orders", tags=["Orders"])
 
@@ -43,7 +44,7 @@ def seed_sample_orders_if_empty(db: Session):
         item1 = OrderItem(
             order_id=sample1.id,
             item_name="Iced Oat Flat White",
-            price=5.50,
+            price=250.00,
             quantity=1,
             milk_choice="Oat",
             sweetness="Half",
@@ -67,7 +68,7 @@ def seed_sample_orders_if_empty(db: Session):
         item2 = OrderItem(
             order_id=sample2.id,
             item_name="Ceremonial Matcha Latte",
-            price=6.50,
+            price=295.00,
             quantity=1,
             milk_choice="Oat",
             sweetness="Normal"
@@ -75,7 +76,7 @@ def seed_sample_orders_if_empty(db: Session):
         item3 = OrderItem(
             order_id=sample2.id,
             item_name="Artisan Almond Croissant",
-            price=4.50,
+            price=225.00,
             quantity=1,
             notes="Warmed"
         )
@@ -85,6 +86,7 @@ def seed_sample_orders_if_empty(db: Session):
 @router.get("", response_model=List[OrderResponse])
 def get_orders(status: Optional[str] = None, db: Session = Depends(get_db)):
     seed_sample_orders_if_empty(db)
+    upgrade_legacy_demo_prices(db)
     query = db.query(Order).order_by(Order.created_at.desc())
     if status:
         query = query.filter(Order.status == status)

@@ -1,819 +1,958 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Sparkles, Camera, Send, ShoppingBag, Plus, Minus, Clock, 
-  Users, Thermometer, Coffee, HeartHandshake, X, ChevronRight
-} from 'lucide-react';
-import { api } from '../../api';
-import type { MenuItem, Order, OrderItem, ChatMessage, SerendipityProfile } from '../../types';
+import { useEffect, useRef, useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
+import {
+  ArrowDown,
+  ArrowRight,
+  ArrowUpRight,
+  BookOpen,
+  Check,
+  ChevronRight,
+  Clock3,
+  Coffee,
+  Laptop,
+  Leaf,
+  LoaderCircle,
+  MapPin,
+  MessageCircle,
+  Minus,
+  Plus,
+  Search,
+  ShieldCheck,
+  ShoppingBag,
+  SlidersHorizontal,
+  Smile,
+  Trash2,
+  Users,
+  Zap,
+} from "lucide-react";
+import { api } from "../../api";
+import { formatPrice as money } from "../../format";
+import type { MenuItem, Order, OrderItem } from "../../types";
+import { Reveal } from "../Motion";
+import { Modal } from "../Modal";
+import { Concierge, Lounge, RoomFeedback } from "./GuestFeatures";
 
-interface CustomerViewProps {
+interface Props {
   cart: OrderItem[];
-  setCart: React.Dispatch<React.SetStateAction<OrderItem[]>>;
+  setCart: Dispatch<SetStateAction<OrderItem[]>>;
   activeOrder: Order | null;
   setActiveOrder: (order: Order | null) => void;
   tableNumber: string;
   setTableNumber: (table: string) => void;
 }
+const vibes = [
+  { label: "Deep Work", description: "Find your focus", icon: Laptop },
+  {
+    label: "Quick Catch-up",
+    description: "A little good company",
+    icon: MessageCircle,
+  },
+  { label: "Unwind & Read", description: "Take the slow lane", icon: BookOpen },
+  { label: "Post-Workout", description: "Refuel & refresh", icon: Zap },
+];
+const photoMap: Record<string, string> = {
+  "Iced Oat Flat White": "iced-oat",
+  "Single Origin Pour-Over (Ethiopian Yirgacheffe)": "pour-over",
+  "Ceremonial Matcha Latte": "matcha",
+  "Vanilla Nitro Cold Brew": "cold-brew",
+  "Honey Lavender Chamomile Tea": "herbal-tea",
+  "Artisan Almond Croissant": "croissant",
+  "Sourdough Avocado & Truffle Toast": "toast",
+};
+const imageFor = (item: MenuItem) =>
+  photoMap[item.name] ? `/images/${photoMap[item.name]}.jpg` : item.image_url;
+const defaultMilk = (item: MenuItem) =>
+  /latte|flat white/i.test(item.name) ? "Oat" : "None";
+const sameItem = (a: OrderItem, b: OrderItem) =>
+  a.item_name === b.item_name &&
+  a.milk_choice === b.milk_choice &&
+  a.sweetness === b.sweetness &&
+  (a.notes || "") === (b.notes || "");
 
-export const CustomerView: React.FC<CustomerViewProps> = ({
+function TableSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="table-select">
+      <MapPin size={15} />
+      <span className="sr-only">Your Table</span>
+      <select
+        aria-label="Your Table"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {Array.from({ length: 10 }, (_, index) => (
+          <option key={index} value={`Table ${index + 1}`}>
+            Table {index + 1}
+          </option>
+        ))}
+        <option value="Counter">Counter</option>
+      </select>
+    </label>
+  );
+}
+
+function CustomizeItem({
+  item,
+  onAdd,
+  onClose,
+}: {
+  item: MenuItem;
+  onAdd: (item: OrderItem) => void;
+  onClose: () => void;
+}) {
+  const [milk, setMilk] = useState(defaultMilk(item));
+  const [sweetness, setSweetness] = useState("Normal");
+  const [notes, setNotes] = useState("");
+  return (
+    <Modal title="Make it yours" onClose={onClose}>
+      <div className="customize-product">
+        {imageFor(item) && <img src={imageFor(item)} alt={item.name} />}
+        <div>
+          <h3>{item.name}</h3>
+          <p>{item.description}</p>
+          <strong>{money(item.price)}</strong>
+        </div>
+      </div>
+      <form
+        className="form-stack"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onAdd({
+            item_name: item.name,
+            price: item.price,
+            quantity: 1,
+            milk_choice: milk,
+            sweetness,
+            notes,
+          });
+          onClose();
+        }}
+      >
+        <label className="field-label">
+          Milk choice
+          <select
+            value={milk}
+            onChange={(event) => setMilk(event.target.value)}
+          >
+            {["None", "Oat", "Whole", "Almond", "Soy", "Skim"].map((value) => (
+              <option key={value}>{value}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field-label">
+          Sweetness
+          <select
+            value={sweetness}
+            onChange={(event) => setSweetness(event.target.value)}
+          >
+            {["Normal", "Unsweetened", "Less Sweet", "Extra Sweet"].map(
+              (value) => (
+                <option key={value}>{value}</option>
+              ),
+            )}
+          </select>
+        </label>
+        <label className="field-label">
+          Notes <span>Optional</span>
+          <textarea
+            value={notes}
+            maxLength={500}
+            rows={2}
+            onChange={(event) => setNotes(event.target.value)}
+            placeholder="Anything we should know?"
+          />
+        </label>
+        <p className="helper-text">
+          Dietary information:{" "}
+          {item.dietary_tags.split(",").join(", ") || "Ask your barista"}.
+        </p>
+        <button
+          className="primary-button full-width"
+          disabled={!item.is_available}
+        >
+          Add to Order · {money(item.price)}
+          <Plus size={18} />
+        </button>
+      </form>
+    </Modal>
+  );
+}
+
+export function CustomerView({
   cart,
   setCart,
   activeOrder,
   setActiveOrder,
   tableNumber,
   setTableNumber,
-}) => {
-  const [vibeMode, setVibeMode] = useState<string>('Deep Work 💻');
+}: Props) {
+  const [vibe, setVibe] = useState("Deep Work");
+  const [panel, setPanel] = useState<"menu" | "concierge" | "lounge">("menu");
   const [menu, setMenu] = useState<MenuItem[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<string>('All');
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      role: 'model',
-      content: 'Welcome to The Café Companion! I can recommend pairings based on your vibe, adjust drinks for allergies, or order directly from a photo. What are you in the mood for today?',
+  const [menuState, setMenuState] = useState<"loading" | "ready" | "error">(
+    "loading",
+  );
+  const [category, setCategory] = useState("All");
+  const [query, setQuery] = useState("");
+  const [allergies, setAllergies] = useState("");
+  const [customItem, setCustomItem] = useState<MenuItem | null>(null);
+  const [checkout, setCheckout] = useState(false);
+  const [feedback, setFeedback] = useState(false);
+  const [placingOrder, setPlacingOrder] = useState(false);
+  const [orderError, setOrderError] = useState("");
+  const [trackingError, setTrackingError] = useState(false);
+  const [toast, setToast] = useState("");
+  const [mobileCart, setMobileCart] = useState(false);
+  const menuAnchor = useRef<HTMLDivElement>(null);
+  const activeOrderId = activeOrder?.id;
+  const activeOrderStatus = activeOrder?.status;
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
     },
-  ]);
-  const [inputMessage, setInputMessage] = useState<string>('');
-  const [isAiTyping, setIsAiTyping] = useState<boolean>(false);
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
-  const [isAnalyzingPhoto, setIsAnalyzingPhoto] = useState<boolean>(false);
-  const [photoResult, setPhotoResult] = useState<any>(null);
-  const [showCheckoutModal, setShowCheckoutModal] = useState<boolean>(false);
-  const [allergiesInput, setAllergiesInput] = useState<string>('');
-  const [feedbackSent, setFeedbackSent] = useState<boolean>(false);
-  const [feedbackVibe, setFeedbackVibe] = useState<number>(5);
-  const [feedbackTemp, setFeedbackTemp] = useState<string>('Comfortable');
-  const [feedbackNoise, setFeedbackNoise] = useState<string>('Just Right');
-  const [feedbackComment, setFeedbackComment] = useState<string>('');
-  const [loungeProfiles, setLoungeProfiles] = useState<SerendipityProfile[]>([]);
-  const [showLoungeJoin, setShowLoungeJoin] = useState<boolean>(false);
-  const [nickname, setNickname] = useState<string>('');
-  const [topic, setTopic] = useState<string>('');
-  const [lookingFor] = useState<string>('Co-working buddy');
-  const [joinedLounge, setJoinedLounge] = useState<boolean>(false);
+    [],
+  );
 
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
+  async function loadMenu() {
+    try {
+      setMenu(await api.getMenu());
+      setMenuState("ready");
+    } catch {
+      setMenuState("error");
+    }
+  }
   useEffect(() => {
-    loadMenu();
-    loadLounge();
-  }, []);
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages, isAiTyping]);
-
-  const loadMenu = async () => {
-    try {
-      const items = await api.getMenu();
-      setMenu(items);
-    } catch (err) {
-      console.error('Error loading menu:', err);
-    }
-  };
-
-  const loadLounge = async () => {
-    try {
-      const members = await api.getLoungeMembers();
-      setLoungeProfiles(members);
-    } catch (err) {
-      console.error('Error loading lounge:', err);
-    }
-  };
-
-  const vibes = [
-    { label: 'Deep Work 💻', desc: 'High caffeine, clean energy' },
-    { label: 'Quick Catch-up ☕', desc: 'Balanced crowd favorites' },
-    { label: 'Unwind & Read 📖', desc: 'Herbal, low caffeine, comforting' },
-    { label: 'Post-Workout ⚡', desc: 'Hydration & protein pairings' },
-  ];
-
-  const handleSendMessage = async (customText?: string) => {
-    const textToSend = customText || inputMessage;
-    if (!textToSend.trim()) return;
-
-    const newHistory: ChatMessage[] = [...chatMessages, { role: 'user', content: textToSend }];
-    setChatMessages(newHistory);
-    setInputMessage('');
-    setIsAiTyping(true);
-
-    try {
-      const response = await api.sendChat(textToSend, newHistory, vibeMode, allergiesInput);
-      setChatMessages((prev) => [...prev, { role: 'model', content: response.reply }]);
-
-      // If AI recommended items, auto-offer to add to cart
-      if (response.suggested_items && response.suggested_items.length > 0) {
-        response.suggested_items.forEach((item: any) => {
-          addToCart({
-            item_name: item.item_name,
-            price: item.price,
-            quantity: item.quantity || 1,
-            milk_choice: item.milk_choice || 'Whole',
-            sweetness: item.sweetness || 'Normal',
-            notes: item.notes,
-          });
-        });
-      }
-    } catch (err) {
-      setChatMessages((prev) => [
-        ...prev,
-        { role: 'model', content: "Sorry, I had trouble connecting to Gemini. I'm still here to help you order manually!" },
-      ]);
-    } finally {
-      setIsAiTyping(false);
-    }
-  };
-
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64 = reader.result as string;
-      setPhotoPreview(base64);
-      setIsAnalyzingPhoto(true);
-      setPhotoResult(null);
-
-      try {
-        const result = await api.sendPhotoOrder(base64);
-        setPhotoResult(result);
-        if (result.recommended_cart_item) {
-          addToCart(result.recommended_cart_item);
+    let cancelled = false;
+    api
+      .getMenu()
+      .then((items) => {
+        if (!cancelled) {
+          setMenu(items);
+          setMenuState("ready");
         }
-      } catch (err) {
-        console.error('Photo analysis error:', err);
-      } finally {
-        setIsAnalyzingPhoto(false);
-      }
+      })
+      .catch(() => {
+        if (!cancelled) setMenuState("error");
+      });
+    return () => {
+      cancelled = true;
     };
-    reader.readAsDataURL(file);
-  };
-
-  const addToCart = (item: OrderItem) => {
-    setCart((prev) => {
-      const existing = prev.find((i) => i.item_name === item.item_name && i.milk_choice === item.milk_choice);
-      if (existing) {
-        return prev.map((i) =>
-          i.item_name === item.item_name && i.milk_choice === item.milk_choice
-            ? { ...i, quantity: i.quantity + item.quantity }
-            : i
-        );
+  }, []);
+  useEffect(() => {
+    if (activeOrderId === undefined || activeOrderStatus === "completed")
+      return;
+    let disposed = false;
+    let fetching = false;
+    async function refresh() {
+      if (fetching) return;
+      fetching = true;
+      try {
+        const orders = await api.getOrders();
+        const updated = orders.find((order) => order.id === activeOrderId);
+        if (!disposed) {
+          if (updated) setActiveOrder(updated);
+          setTrackingError(false);
+        }
+      } catch {
+        if (!disposed) setTrackingError(true);
+      } finally {
+        fetching = false;
       }
-      return [...prev, item];
-    });
-  };
+    }
+    const interval = setInterval(() => void refresh(), 8000);
+    return () => {
+      disposed = true;
+      clearInterval(interval);
+    };
+  }, [activeOrderId, activeOrderStatus, setActiveOrder]);
 
-  const removeFromCart = (index: number) => {
-    setCart((prev) => prev.filter((_, idx) => idx !== index));
-  };
-
-  const updateQuantity = (index: number, delta: number) => {
-    setCart((prev) =>
-      prev
-        .map((item, idx) => (idx === index ? { ...item, quantity: Math.max(1, item.quantity + delta) } : item))
-        .filter((item) => item.quantity > 0)
+  function addToCart(item: OrderItem) {
+    setCart((previous) =>
+      previous.some((existing) => sameItem(existing, item))
+        ? previous.map((existing) =>
+            sameItem(existing, item)
+              ? { ...existing, quantity: existing.quantity + item.quantity }
+              : existing,
+          )
+        : [...previous, item],
     );
-  };
-
-  const cartTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-
-  const handlePlaceOrder = async () => {
-    if (cart.length === 0) return;
+    setToast(`${item.item_name} added to your order`);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(""), 3000);
+  }
+  function quantity(index: number, delta: number) {
+    setCart((previous) =>
+      previous
+        .map((item, i) =>
+          i === index ? { ...item, quantity: item.quantity + delta } : item,
+        )
+        .filter((item) => item.quantity > 0),
+    );
+  }
+  async function placeOrder() {
+    if (placingOrder || cart.length === 0) return;
+    setPlacingOrder(true);
+    setOrderError("");
     try {
-      const newOrder = await api.createOrder({
+      const order = await api.createOrder({
         customer_name: `Patron (${tableNumber})`,
         table_number: tableNumber,
-        vibe_mode: vibeMode,
-        allergies: allergiesInput,
+        vibe_mode: vibe,
+        allergies,
         items: cart,
       });
-      setActiveOrder(newOrder);
+      setActiveOrder(order);
       setCart([]);
-      setShowCheckoutModal(false);
-    } catch (err) {
-      alert('Failed to place order. Please try again.');
+      setCheckout(false);
+      setMobileCart(false);
+    } catch {
+      setOrderError(
+        "Your order was not placed. Please try again. Your items are still here.",
+      );
+    } finally {
+      setPlacingOrder(false);
     }
-  };
+  }
+  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const count = cart.reduce((sum, item) => sum + item.quantity, 0);
+  const filtered = menu.filter(
+    (item) =>
+      (category === "All" || category === item.category) &&
+      `${item.name} ${item.description} ${item.dietary_tags}`
+        .toLowerCase()
+        .includes(query.toLowerCase()),
+  );
+  const categories = ["All", "Coffee", "Tea", "Cold Brew", "Pastry", "Food"];
+  function browse() {
+    setPanel("menu");
+    menuAnchor.current?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+      block: "start",
+    });
+  }
 
-  const handleSendFeedback = async () => {
-    try {
-      await api.submitFeedback({
-        table_number: tableNumber,
-        vibe_rating: feedbackVibe,
-        temperature: feedbackTemp,
-        ambient_noise: feedbackNoise,
-        comment: feedbackComment,
-      });
-      setFeedbackSent(true);
-      setTimeout(() => setFeedbackSent(false), 4000);
-      setFeedbackComment('');
-    } catch (err) {
-      console.error('Feedback error:', err);
-    }
-  };
-
-  const handleJoinLounge = async () => {
-    if (!nickname.trim() || !topic.trim()) return;
-    try {
-      const newMember = await api.joinLounge({
-        nickname,
-        table_number: tableNumber,
-        topic,
-        looking_for: lookingFor,
-      });
-      setLoungeProfiles((prev) => [newMember, ...prev]);
-      setJoinedLounge(true);
-      setShowLoungeJoin(false);
-    } catch (err) {
-      console.error('Lounge join error:', err);
-    }
-  };
-
-  const categories = ['All', 'Coffee', 'Tea', 'Cold Brew', 'Pastry', 'Food'];
-  const filteredMenu =
-    selectedCategory === 'All' ? menu : menu.filter((item) => item.category === selectedCategory);
-
-  return (
-    <div className="max-w-6xl mx-auto px-4 py-6 space-y-8">
-      {/* 1. Vibe Selection Banner */}
-      <div className="bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-amber-600/10 border border-amber-200/60 rounded-2xl p-5 shadow-sm">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 text-amber-800 font-semibold text-sm uppercase tracking-wider">
-              <Sparkles className="w-4 h-4 text-amber-600" /> Current Session Vibe
-            </div>
-            <h2 className="text-xl font-bold text-slate-800 mt-1">What brings you to the café today?</h2>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-slate-500">Your Table:</span>
-            <select
-              value={tableNumber}
-              onChange={(e) => setTableNumber(e.target.value)}
-              className="bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-sm"
-            >
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
-                <option key={num} value={`Table ${num}`}>Table {num}</option>
-              ))}
-              <option value="Counter">Counter</option>
-            </select>
-          </div>
+  const cartContent = (
+    <>
+      <div className="cart-heading">
+        <div>
+          <ShoppingBag size={19} strokeWidth={1.7} />
+          <h2>Your order</h2>
         </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
-          {vibes.map((v) => (
-            <button
-              key={v.label}
-              onClick={() => setVibeMode(v.label)}
-              className={`p-3 rounded-xl text-left border transition-all ${
-                vibeMode === v.label
-                  ? 'bg-amber-600 text-white border-amber-600 shadow-md ring-2 ring-amber-300'
-                  : 'bg-white hover:bg-amber-50 text-slate-700 border-amber-100'
-              }`}
-            >
-              <div className="font-semibold text-sm">{v.label}</div>
-              <div className={`text-xs mt-1 ${vibeMode === v.label ? 'text-amber-100' : 'text-slate-500'}`}>
-                {v.desc}
-              </div>
-            </button>
-          ))}
-        </div>
+        <span className="item-count">
+          {count} {count === 1 ? "item" : "items"}
+        </span>
       </div>
-
-      {/* 2. Live Order Tracker (if active order exists) */}
-      {activeOrder && activeOrder.status !== 'completed' && (
-        <div className="bg-white border-2 border-amber-500 rounded-2xl p-5 shadow-lg animate-fade-in">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center font-bold">
-                {activeOrder.order_number}
+      <div className="cart-table">
+        <span>Make yourself comfortable.</span>
+        <TableSelect value={tableNumber} onChange={setTableNumber} />
+      </div>
+      {cart.length === 0 ? (
+        <div className="cart-empty">
+          <span className="empty-bag">
+            <ShoppingBag size={34} strokeWidth={1.1} />
+          </span>
+          <h3>Your next favorite awaits.</h3>
+          <p>
+            A little pick-me-up? Add something
+            <br />
+            from the menu to get started.
+          </p>
+          <button
+            className="text-button"
+            onClick={() => {
+              setMobileCart(false);
+              browse();
+            }}
+          >
+            Find something good
+            <ArrowRight size={15} />
+          </button>
+        </div>
+      ) : (
+        <div className="cart-items">
+          {cart.map((item, index) => (
+            <article
+              className="cart-item"
+              key={`${item.item_name}-${item.milk_choice}-${item.sweetness}-${item.notes}`}
+            >
+              <div className="cart-item-top">
+                <h3>{item.item_name}</h3>
+                <button
+                  className="icon-button small"
+                  aria-label={`Remove ${item.item_name}`}
+                  onClick={() =>
+                    setCart((previous) =>
+                      previous.filter((_, i) => i !== index),
+                    )
+                  }
+                >
+                  <Trash2 size={14} />
+                </button>
               </div>
-              <div>
-                <h3 className="font-bold text-slate-800">Your Order is in Progress!</h3>
-                <p className="text-xs text-slate-500">Table: {activeOrder.table_number} • Vibe: {activeOrder.vibe_mode}</p>
+              <p>
+                {item.milk_choice !== "None"
+                  ? `${item.milk_choice} milk · `
+                  : ""}
+                {item.sweetness} sweetness
+              </p>
+              {item.notes && <p>{item.notes}</p>}
+              <div className="cart-item-bottom">
+                <div className="quantity-control">
+                  <button
+                    aria-label={`Decrease ${item.item_name} quantity`}
+                    onClick={() => quantity(index, -1)}
+                  >
+                    <Minus size={13} />
+                  </button>
+                  <span>{item.quantity}</span>
+                  <button
+                    aria-label={`Increase ${item.item_name} quantity`}
+                    onClick={() => quantity(index, 1)}
+                  >
+                    <Plus size={13} />
+                  </button>
+                </div>
+                <strong>{money(item.price * item.quantity)}</strong>
               </div>
-            </div>
-            <div className="text-right">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider bg-amber-100 text-amber-800">
-                <Clock className="w-3.5 h-3.5" />
-                {activeOrder.status === 'pending' ? 'Queued' : activeOrder.status === 'preparing' ? 'Brewing' : 'Ready for Pickup!'}
-              </span>
-              <p className="text-xs text-slate-400 mt-1">Est. wait: ~{activeOrder.estimated_wait_minutes} mins</p>
-            </div>
-          </div>
-
-          {/* Stepper */}
-          <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-slate-100 text-center">
-            <div className="flex flex-col items-center">
-              <div className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-bold">
-                ✓
-              </div>
-              <span className="text-xs font-medium text-slate-700 mt-1">Order Received</span>
-            </div>
-            <div className="flex flex-col items-center">
-              <div
-                className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                  activeOrder.status === 'preparing' || activeOrder.status === 'ready'
-                    ? 'bg-amber-500 text-white'
-                    : 'bg-slate-200 text-slate-500'
-                }`}
-              >
-                2
-              </div>
-              <span className="text-xs font-medium text-slate-700 mt-1">Barista Brewing</span>
-            </div>
-            <div className="flex flex-col items-center">
-              <div
-                className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                  activeOrder.status === 'ready' ? 'bg-emerald-500 text-white animate-pulse' : 'bg-slate-200 text-slate-500'
-                }`}
-              >
-                3
-              </div>
-              <span className="text-xs font-medium text-slate-700 mt-1">Ready for Pickup</span>
-            </div>
-          </div>
+            </article>
+          ))}
         </div>
       )}
-
-      {/* 3. Main Grid: AI Conversational Concierge & Photo Order */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Left 2 Cols: AI Chat & Multimodal Photo Recognition */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col h-[520px]">
-            {/* Chat Header */}
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/60 rounded-t-2xl">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-500 text-white flex items-center justify-center shadow-sm">
-                  <Sparkles className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-slate-800 text-sm">Gemini AI Concierge</h3>
-                  <p className="text-xs text-slate-500">Conversational ordering & dietary customization</p>
-                </div>
-              </div>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg text-xs font-semibold border border-amber-200 transition-colors"
-              >
-                <Camera className="w-4 h-4 text-amber-600" />
-                <span>Snap to Order</span>
-              </button>
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handlePhotoUpload}
-                accept="image/*"
-                className="hidden"
-              />
-            </div>
-
-            {/* Chat Body */}
-            <div className="flex-1 p-4 overflow-y-auto space-y-4">
-              {chatMessages.map((msg, idx) => (
-                <div
-                  key={idx}
-                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm ${
-                      msg.role === 'user'
-                        ? 'bg-amber-600 text-white rounded-br-none shadow-sm'
-                        : 'bg-slate-100 text-slate-800 rounded-bl-none'
-                    }`}
-                  >
-                    {msg.content}
-                  </div>
-                </div>
-              ))}
-
-              {isAiTyping && (
-                <div className="flex justify-start">
-                  <div className="bg-slate-100 text-slate-500 rounded-2xl px-4 py-3 text-xs flex items-center gap-2">
-                    <Sparkles className="w-3.5 h-3.5 animate-spin text-amber-500" />
-                    Gemini is curating your order...
-                  </div>
-                </div>
-              )}
-
-              {/* Multimodal Photo Detection Result Card */}
-              {photoPreview && (
-                <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl space-y-3">
-                  <div className="flex items-start gap-3">
-                    <img
-                      src={photoPreview}
-                      alt="Uploaded drink"
-                      className="w-16 h-16 rounded-xl object-cover border border-amber-300 shadow-sm"
-                    />
-                    <div className="flex-1 text-xs">
-                      <div className="font-bold text-amber-900 text-sm flex items-center gap-1.5">
-                        <Camera className="w-4 h-4 text-amber-600" /> Multimodal Photo Detection
-                      </div>
-                      {isAnalyzingPhoto ? (
-                        <p className="text-amber-700 animate-pulse mt-1">Analyzing visual layers, microfoam & drink type...</p>
-                      ) : photoResult ? (
-                        <div className="mt-1 space-y-1">
-                          <p className="font-semibold text-slate-800">Identified: {photoResult.identified_item}</p>
-                          <p className="text-slate-600">{photoResult.description}</p>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-medium">
-                              Matched: {photoResult.matched_menu_item}
-                            </span>
-                            <span className="text-slate-500">Auto-added to cart!</span>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div ref={chatEndRef} />
-            </div>
-
-            {/* Quick Prompts Bar */}
-            <div className="px-4 py-2 bg-slate-50/50 border-t border-slate-100 flex items-center gap-2 overflow-x-auto text-xs">
-              <span className="text-slate-400 whitespace-nowrap">Try asking:</span>
-              <button
-                onClick={() => handleSendMessage('I need something oat-milk based and high caffeine for coding')}
-                className="whitespace-nowrap px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 rounded-full"
-              >
-                ⚡ High caffeine + oat milk
-              </button>
-              <button
-                onClick={() => handleSendMessage('Suggest a caffeine-free tea and a sweet pastry')}
-                className="whitespace-nowrap px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 rounded-full"
-              >
-                🥐 Herbal tea & pastry pair
-              </button>
-              <button
-                onClick={() => handleSendMessage('What is your most popular iced drink?')}
-                className="whitespace-nowrap px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 rounded-full"
-              >
-                🧊 Top iced specialty
-              </button>
-            </div>
-
-            {/* Chat Input */}
-            <div className="p-3 border-t border-slate-200 flex items-center gap-2">
-              <input
-                type="text"
-                value={inputMessage}
-                onChange={(e) => setInputMessage(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                placeholder="Ask Gemini to curate an order or describe what you feel like..."
-                className="flex-1 bg-slate-100 border border-transparent focus:bg-white focus:border-amber-400 rounded-xl px-4 py-2.5 text-sm text-slate-800 focus:outline-none transition-all"
-              />
-              <button
-                onClick={() => handleSendMessage()}
-                disabled={!inputMessage.trim()}
-                className="w-10 h-10 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white flex items-center justify-center transition-colors shadow-sm"
-              >
-                <Send className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
+      <div className="cart-bottom">
+        <div className="cart-total">
+          <span>Total</span>
+          <strong>{money(total)}</strong>
         </div>
+        <button
+          className="primary-button full-width"
+          disabled={cart.length === 0}
+          onClick={() => {
+            setOrderError("");
+            setCheckout(true);
+            setMobileCart(false);
+          }}
+        >
+          Review &amp; Order
+          <ArrowRight size={17} />
+        </button>
+        <p className="cart-footnote">
+          <ShieldCheck size={13} /> Review everything before placing your order.
+        </p>
+      </div>
+    </>
+  );
 
-        {/* Right Col: Smart Cart & Ordering Panel */}
-        <div className="space-y-6">
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <ShoppingBag className="w-5 h-5 text-amber-600" />
-                <h3 className="font-bold text-slate-800">Your Smart Cart</h3>
-              </div>
-              <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-bold">
-                {cart.reduce((a, b) => a + b.quantity, 0)} items
-              </span>
-            </div>
-
-            {cart.length === 0 ? (
-              <div className="text-center py-10 text-slate-400 space-y-2">
-                <Coffee className="w-10 h-10 mx-auto text-slate-300 stroke-[1.5]" />
-                <p className="text-sm">Your cart is empty.</p>
-                <p className="text-xs">Ask the AI Concierge or tap any item below to add!</p>
-              </div>
-            ) : (
-              <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
-                {cart.map((item, idx) => (
-                  <div key={idx} className="flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-100 text-sm">
-                    <div className="flex-1 pr-2">
-                      <div className="font-semibold text-slate-800">{item.item_name}</div>
-                      <div className="text-xs text-slate-500">
-                        {item.milk_choice} Milk • {item.sweetness} Sweet
-                      </div>
-                      <div className="text-xs font-bold text-amber-700 mt-0.5">${(item.price * item.quantity).toFixed(2)}</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => updateQuantity(idx, -1)}
-                        className="w-6 h-6 rounded-md bg-white border border-slate-200 text-slate-600 flex items-center justify-center hover:bg-slate-100"
-                      >
-                        <Minus className="w-3 h-3" />
-                      </button>
-                      <span className="text-xs font-bold w-4 text-center">{item.quantity}</span>
-                      <button
-                        onClick={() => updateQuantity(idx, 1)}
-                        className="w-6 h-6 rounded-md bg-white border border-slate-200 text-slate-600 flex items-center justify-center hover:bg-slate-100"
-                      >
-                        <Plus className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={() => removeFromCart(idx)}
-                        className="text-slate-400 hover:text-red-500 ml-1"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {cart.length > 0 && (
-              <div className="pt-3 border-t border-slate-100 space-y-3">
-                <div className="flex justify-between items-center text-sm font-semibold text-slate-800">
-                  <span>Total</span>
-                  <span className="text-lg text-amber-700 font-bold">${cartTotal.toFixed(2)}</span>
-                </div>
-                <button
-                  onClick={() => setShowCheckoutModal(true)}
-                  className="w-full py-3 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2"
-                >
-                  <span>Review & Order for {tableNumber}</span>
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* "Understand the Room" Micro-Feedback Widget */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
-            <div className="flex items-center gap-2 text-slate-800 font-bold text-sm">
-              <Thermometer className="w-4 h-4 text-rose-500" />
-              <span>Room Vibe & Comfort</span>
-            </div>
-            <p className="text-xs text-slate-500">Help the café staff adjust the AC or music in real-time!</p>
-
-            <div className="grid grid-cols-3 gap-2 text-xs">
-              <button
-                onClick={() => setFeedbackTemp(feedbackTemp === 'Too Cold' ? 'Comfortable' : 'Too Cold')}
-                className={`py-1.5 px-2 rounded-lg border font-medium transition-all ${
-                  feedbackTemp === 'Too Cold' ? 'bg-blue-50 border-blue-400 text-blue-700 font-bold' : 'bg-slate-50 text-slate-600 border-slate-200'
-                }`}
-              >
-                ❄️ Too Cold
-              </button>
-              <button
-                onClick={() => setFeedbackNoise(feedbackNoise === 'Too Loud' ? 'Just Right' : 'Too Loud')}
-                className={`py-1.5 px-2 rounded-lg border font-medium transition-all ${
-                  feedbackNoise === 'Too Loud' ? 'bg-orange-50 border-orange-400 text-orange-700 font-bold' : 'bg-slate-50 text-slate-600 border-slate-200'
-                }`}
-              >
-                🔊 Too Loud
-              </button>
-              <button
-                onClick={() => setFeedbackVibe(5)}
-                className={`py-1.5 px-2 rounded-lg border font-medium transition-all ${
-                  feedbackVibe === 5 ? 'bg-amber-50 border-amber-400 text-amber-700 font-bold' : 'bg-slate-50 text-slate-600 border-slate-200'
-                }`}
-              >
-                ✨ Great Vibe
-              </button>
-            </div>
-
-            <input
-              type="text"
-              value={feedbackComment}
-              onChange={(e) => setFeedbackComment(e.target.value)}
-              placeholder="Optional note for the baristas..."
-              className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white"
-            />
-
+  return (
+    <div className="page-width customer-page">
+      <div className="welcome-row">
+        <span>
+          <Coffee size={15} /> A good day starts here.
+        </span>
+        <TableSelect value={tableNumber} onChange={setTableNumber} />
+      </div>
+      <Reveal className="cafe-hero">
+        <div className="hero-copy">
+          <span className="eyebrow" data-enter>
+            YOUR DAILY PAUSE
+          </span>
+          <h1 data-enter>
+            A little pause.
+            <br />A good coffee<span>.</span>
+          </h1>
+          <p data-enter>
+            Settle in. Find your favorite.
+            <br />
+            We’ll take care of the rest.
+          </p>
+          <div className="hero-actions" data-enter>
+            <button className="primary-button" onClick={browse}>
+              Explore the menu
+              <ArrowDown size={16} />
+            </button>
             <button
-              onClick={handleSendFeedback}
-              className="w-full py-1.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-lg transition-colors"
+              className="text-button"
+              onClick={() => {
+                setPanel("concierge");
+                menuAnchor.current?.scrollIntoView({ behavior: "auto" });
+              }}
             >
-              {feedbackSent ? '✓ Sent to Baristas!' : 'Send Live Feedback'}
+              Help me choose
+              <ArrowUpRight size={15} />
             </button>
           </div>
         </div>
-      </div>
-
-      {/* 4. Interactive Menu Section */}
-      <div className="space-y-4 pt-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
-          <div>
-            <h3 className="text-xl font-bold text-slate-800">Café Menu</h3>
-            <p className="text-xs text-slate-500">Artisan single-origin beans, craft beverages, and fresh bakery</p>
+        <div className="hero-photo">
+          <img
+            data-photo
+            src="/images/cafe-moment.jpg"
+            alt="Fresh coffee, a quiet table, and a moment to slow down"
+            width="1200"
+            height="800"
+            fetchPriority="high"
+          />
+        </div>
+      </Reveal>
+      <section className="vibe-section" aria-labelledby="vibe-title">
+        <div className="vibe-heading">
+          <h2 id="vibe-title">What’s your kind of day?</h2>
+          <p>A little context for your companion.</p>
+        </div>
+        <div className="vibe-options">
+          {vibes.map(({ label, description, icon: Icon }) => (
+            <button
+              key={label}
+              className={`vibe-option ${vibe === label ? "selected" : ""}`}
+              onClick={() => setVibe(label)}
+              aria-pressed={vibe === label}
+            >
+              <Icon size={20} strokeWidth={1.6} />
+              <span>
+                <strong>{label}</strong>
+                <small>{description}</small>
+              </span>
+              <span className="vibe-check">
+                {vibe === label && <Check size={12} />}
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
+      {activeOrder && (
+        <section
+          className={`order-tracker ${activeOrder.status === "ready" ? "order-ready" : ""}`}
+          aria-label="Your order status"
+          aria-live="polite"
+        >
+          <div className="tracker-info">
+            <span className="tracker-icon">
+              {activeOrder.status === "ready" ||
+              activeOrder.status === "completed" ? (
+                <Check size={22} />
+              ) : (
+                <Coffee size={22} />
+              )}
+            </span>
+            <div>
+              <strong>
+                {activeOrder.status === "ready"
+                  ? "Your order is ready. Enjoy!"
+                  : activeOrder.status === "completed"
+                    ? "Thanks for sharing a moment with us."
+                    : "Something good is on its way."}
+              </strong>
+              <p>
+                {activeOrder.order_number} · {activeOrder.table_number}
+                {!["ready", "completed"].includes(activeOrder.status) &&
+                  ` · About ${activeOrder.estimated_wait_minutes} min`}
+              </p>
+              {trackingError && (
+                <span className="helper-text">
+                  Live updates interrupted. Reconnecting…
+                </span>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-            {categories.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setSelectedCategory(cat)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
-                  selectedCategory === cat
-                    ? 'bg-amber-600 text-white'
-                    : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200'
-                }`}
+          <ol className="order-steps">
+            {["Received", "Preparing", "Ready"].map((label, index) => (
+              <li
+                key={label}
+                className={
+                  index <=
+                  (activeOrder.status === "pending"
+                    ? 0
+                    : activeOrder.status === "preparing"
+                      ? 1
+                      : 2)
+                    ? "done"
+                    : ""
+                }
               >
-                {cat}
+                <span>
+                  {index <=
+                  (activeOrder.status === "pending"
+                    ? 0
+                    : activeOrder.status === "preparing"
+                      ? 1
+                      : 2) ? (
+                    <Check size={12} />
+                  ) : (
+                    index + 1
+                  )}
+                </span>
+                {label}
+              </li>
+            ))}
+          </ol>
+          {activeOrder.status === "completed" && (
+            <button
+              className="text-button"
+              onClick={() => setActiveOrder(null)}
+            >
+              Dismiss
+            </button>
+          )}
+        </section>
+      )}
+      <div ref={menuAnchor} className="ordering-layout" id="cafe-menu">
+        <div className="ordering-main">
+          <nav className="content-tabs" aria-label="Café experiences">
+            {(
+              [
+                { id: "menu", label: "Café Menu", icon: Coffee },
+                { id: "concierge", label: "Concierge", icon: MessageCircle },
+                { id: "lounge", label: "Lounge", icon: Users },
+              ] as const
+            ).map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                aria-pressed={panel === id}
+                className={panel === id ? "active" : ""}
+                onClick={() => setPanel(id)}
+              >
+                <Icon size={17} strokeWidth={1.7} />
+                {label}
+                {panel === id && <span className="active-tab-line" />}
               </button>
             ))}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredMenu.map((item) => (
-            <div
-              key={item.id}
-              className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between"
-            >
+          </nav>
+          <section hidden={panel !== "menu"} aria-label="Café Menu">
+            <div className="menu-heading">
               <div>
-                {item.image_url && (
-                  <img src={item.image_url} alt={item.name} className="w-full h-40 object-cover" />
-                )}
-                <div className="p-4 space-y-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <h4 className="font-bold text-slate-800 text-base">{item.name}</h4>
-                    <span className="font-bold text-amber-700">${item.price.toFixed(2)}</span>
-                  </div>
-                  <p className="text-xs text-slate-500 leading-relaxed">{item.description}</p>
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {item.dietary_tags &&
-                      item.dietary_tags.split(',').map((tag) => (
-                        <span key={tag} className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md font-medium border border-emerald-200">
-                          {tag.trim()}
-                        </span>
-                      ))}
-                    <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md font-medium">
-                      ☕ {item.caffeine_level}
-                    </span>
-                  </div>
-                </div>
+                <h2>Made with a little extra care.</h2>
+                <p>Single-origin coffee, slow mornings &amp; fresh bakes.</p>
               </div>
-              <div className="p-4 pt-0">
-                <button
-                  onClick={() =>
-                    addToCart({
-                      item_name: item.name,
-                      price: item.price,
-                      quantity: 1,
-                      milk_choice: 'Oat',
-                      sweetness: 'Normal',
-                    })
-                  }
-                  className="w-full py-2 bg-slate-100 hover:bg-amber-600 hover:text-white text-slate-700 text-xs font-bold rounded-xl transition-colors flex items-center justify-center gap-1.5"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Add to Order
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* 5. Serendipity Lounge ("Connect People") */}
-      <div className="bg-gradient-to-r from-indigo-900 to-slate-900 text-white rounded-3xl p-6 shadow-xl space-y-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-indigo-500/30 border border-indigo-400/40 flex items-center justify-center text-indigo-300">
-              <Users className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="font-bold text-lg flex items-center gap-2">
-                <span>The Serendipity Lounge</span>
-                <span className="text-[10px] bg-indigo-500/40 text-indigo-200 px-2.5 py-0.5 rounded-full border border-indigo-400/30 uppercase tracking-wider font-semibold">
-                  Connect People
-                </span>
-              </h3>
-              <p className="text-xs text-indigo-200/80">Co-working, shared interests, and Gemini-generated icebreakers</p>
-            </div>
-          </div>
-          {!joinedLounge ? (
-            <button
-              onClick={() => setShowLoungeJoin(true)}
-              className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-bold rounded-xl shadow transition-colors flex items-center gap-1.5"
-            >
-              <HeartHandshake className="w-4 h-4" /> Share What You're Working On
-            </button>
-          ) : (
-            <span className="text-xs bg-emerald-500/20 text-emerald-300 px-3 py-1.5 rounded-full border border-emerald-400/30 font-semibold">
-              ✓ You are active in the lounge
-            </span>
-          )}
-        </div>
-
-        {/* Join Modal / Form */}
-        {showLoungeJoin && (
-          <div className="bg-white/10 border border-white/20 rounded-2xl p-4 space-y-3 animate-fade-in text-xs">
-            <div className="font-bold text-sm text-indigo-200">Join Café Community Today</div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <input
-                type="text"
-                placeholder="Your Name / Handle"
-                value={nickname}
-                onChange={(e) => setNickname(e.target.value)}
-                className="bg-black/30 border border-white/20 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-400"
-              />
-              <input
-                type="text"
-                placeholder="What are you working on or reading?"
-                value={topic}
-                onChange={(e) => setTopic(e.target.value)}
-                className="bg-black/30 border border-white/20 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-400 sm:col-span-2"
-              />
-            </div>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowLoungeJoin(false)}
-                className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-slate-300 rounded-lg"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleJoinLounge}
-                className="px-4 py-1.5 bg-indigo-500 hover:bg-indigo-600 text-white font-bold rounded-lg shadow"
-              >
-                Join Lounge
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Members Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
-          {loungeProfiles.map((p) => (
-            <div key={p.id} className="bg-white/5 border border-white/10 rounded-xl p-3.5 space-y-1.5">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-indigo-300">{p.nickname} ({p.table_number})</span>
-                <span className="text-[10px] bg-white/10 px-2 py-0.5 rounded text-indigo-100">{p.looking_for}</span>
-              </div>
-              <p className="text-xs text-white font-medium">{p.topic}</p>
-              {p.icebreaker && (
-                <div className="text-[11px] text-amber-200/90 italic bg-black/20 p-2 rounded-lg border border-amber-300/10">
-                  💡 Gemini Icebreaker: "{p.icebreaker}"
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Checkout Modal */}
-      {showCheckoutModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl">
-            <div className="flex items-center justify-between border-b pb-3">
-              <h3 className="font-bold text-lg text-slate-800">Confirm Café Order</h3>
-              <button onClick={() => setShowCheckoutModal(false)} className="text-slate-400 hover:text-slate-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex justify-between items-center text-sm font-semibold">
-                <span className="text-slate-600">Delivering to:</span>
-                <span className="bg-amber-100 text-amber-800 px-3 py-1 rounded-full font-bold">{tableNumber}</span>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700">Allergies & Dietary Restrictions</label>
+              <label className="menu-search">
+                <Search size={16} />
+                <span className="sr-only">Search menu</span>
                 <input
-                  type="text"
-                  value={allergiesInput}
-                  onChange={(e) => setAllergiesInput(e.target.value)}
-                  placeholder="e.g. Peanut allergy, Lactose intolerant, Vegan only"
-                  className="w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  type="search"
+                  placeholder="Find your favorite"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
                 />
-                <p className="text-[10px] text-slate-400">Our barista team gets an instant safety alert on their screen.</p>
-              </div>
-
-              <div className="border-t pt-3 space-y-1.5 text-xs">
-                {cart.map((item, idx) => (
-                  <div key={idx} className="flex justify-between text-slate-600">
-                    <span>{item.quantity}x {item.item_name} ({item.milk_choice})</span>
-                    <span className="font-semibold text-slate-800">${(item.price * item.quantity).toFixed(2)}</span>
+              </label>
+            </div>
+            <div className="category-row" aria-label="Menu categories">
+              {categories.map((value) => (
+                <button
+                  key={value}
+                  aria-pressed={category === value}
+                  className={category === value ? "active" : ""}
+                  onClick={() => setCategory(value)}
+                >
+                  {value === "All" ? "All favorites" : value}
+                </button>
+              ))}
+              <span>
+                {filtered.length} {filtered.length === 1 ? "item" : "items"}
+              </span>
+            </div>
+            {menuState === "loading" ? (
+              <div
+                className="menu-grid"
+                aria-busy="true"
+                aria-label="Loading menu"
+              >
+                {Array.from({ length: 6 }, (_, index) => (
+                  <div className="menu-skeleton" key={index}>
+                    <div />
+                    <span />
+                    <span />
                   </div>
                 ))}
-                <div className="flex justify-between text-sm font-bold text-slate-900 pt-2 border-t">
-                  <span>Total Amount</span>
-                  <span className="text-amber-700 text-base">${cartTotal.toFixed(2)}</span>
-                </div>
               </div>
-            </div>
-
-            <button
-              onClick={handlePlaceOrder}
-              className="w-full py-3 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow-lg transition-all"
-            >
-              Place Order Now
+            ) : menuState === "error" ? (
+              <div className="empty-state panel">
+                <Coffee size={32} strokeWidth={1.4} />
+                <h3>The menu’s taking a moment.</h3>
+                <p>
+                  We couldn’t reach the café. Your order is still saved here.
+                </p>
+                <button
+                  className="secondary-button"
+                  onClick={() => {
+                    setMenuState("loading");
+                    void loadMenu();
+                  }}
+                >
+                  Try again
+                </button>
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="empty-state">
+                <Search size={30} />
+                <h3>No matches this time.</h3>
+                <p>Try a different name or browse all favorites.</p>
+                <button
+                  className="secondary-button"
+                  onClick={() => {
+                    setQuery("");
+                    setCategory("All");
+                  }}
+                >
+                  Show all favorites
+                </button>
+              </div>
+            ) : (
+              <Reveal
+                className="menu-grid"
+                motionKey={`${panel}-${category}-${query}-${menu.length}`}
+              >
+                {filtered.map((item) => (
+                  <article className="menu-card" key={item.id} data-reveal>
+                    <button
+                      className="menu-image-button"
+                      aria-label={`Customize ${item.name}`}
+                      onClick={() => setCustomItem(item)}
+                    >
+                      {imageFor(item) ? (
+                        <img
+                          loading="lazy"
+                          src={imageFor(item)}
+                          alt={item.name}
+                          width="640"
+                          height="480"
+                          onError={(event) => {
+                            event.currentTarget.style.display = "none";
+                          }}
+                        />
+                      ) : (
+                        <Coffee size={40} strokeWidth={1} />
+                      )}
+                      <span className="image-customize">
+                        <SlidersHorizontal size={15} /> Make it yours
+                      </span>
+                    </button>
+                    <div className="menu-card-body">
+                      <span className="menu-item-category">
+                        {item.category}
+                      </span>
+                      <button
+                        className="item-title"
+                        onClick={() => setCustomItem(item)}
+                      >
+                        {item.name}
+                      </button>
+                      <p className="item-description">{item.description}</p>
+                      <div className="dietary-info">
+                        {item.dietary_tags.includes("contains-nuts") && (
+                          <span className="allergen-tag">Contains nuts</span>
+                        )}
+                        {item.dietary_tags.includes("vegan") && (
+                          <span>
+                            <Leaf size={12} /> Plant based
+                          </span>
+                        )}
+                        {item.dietary_tags.includes("gluten-free") && (
+                          <span>Gluten free</span>
+                        )}
+                        <span>
+                          {item.caffeine_level === "None"
+                            ? "Caffeine free"
+                            : `${item.caffeine_level} caffeine`}
+                        </span>
+                      </div>
+                      <div className="menu-card-bottom">
+                        <strong>{money(item.price)}</strong>
+                        <button
+                          className="add-button"
+                          disabled={!item.is_available}
+                          aria-label={`Add ${item.name} to order`}
+                          onClick={() =>
+                            addToCart({
+                              item_name: item.name,
+                              price: item.price,
+                              quantity: 1,
+                              milk_choice: defaultMilk(item),
+                              sweetness: "Normal",
+                            })
+                          }
+                        >
+                          <Plus size={16} />
+                          <span>{item.is_available ? "Add" : "Sold out"}</span>
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </Reveal>
+            )}
+          </section>
+          <div hidden={panel !== "concierge"}>
+            <Concierge
+              vibe={vibe}
+              allergies={allergies}
+              onAllergiesChange={setAllergies}
+              addToCart={addToCart}
+            />
+          </div>
+          <div hidden={panel !== "lounge"}>
+            <Lounge table={tableNumber} />
+          </div>
+          <div className="menu-endnote">
+            <Coffee size={17} strokeWidth={1.5} />
+            <span>Thoughtfully made. Happily served.</span>
+            <button className="text-button" onClick={() => setFeedback(true)}>
+              How’s your stay?
+              <ArrowUpRight size={14} />
             </button>
           </div>
         </div>
+        <aside className="order-sidebar" aria-label="Your order summary">
+          <section className="cart-panel panel">{cartContent}</section>
+          <button className="comfort-card" onClick={() => setFeedback(true)}>
+            <span className="comfort-icon">
+              <Smile size={23} strokeWidth={1.5} />
+            </span>
+            <span>
+              <strong>Room Vibe &amp; Comfort</strong>
+              <small>
+                Too chilly? Music too loud?
+                <br />
+                Make yourself heard.
+              </small>
+            </span>
+            <ArrowUpRight size={17} />
+          </button>
+          <div className="sidebar-note">
+            <span className="note-line" />
+            <p>
+              A good cup is a small thing.
+              <br />A good moment is everything.
+            </p>
+          </div>
+        </aside>
+      </div>
+      <button
+        className="mobile-cart-button"
+        onClick={() => setMobileCart(true)}
+      >
+        <span>
+          <ShoppingBag size={18} /> Your order{count > 0 && ` (${count})`}
+        </span>
+        <span>
+          {money(total)}
+          <ChevronRight size={17} />
+        </span>
+      </button>
+      <div
+        className={`toast ${toast ? "visible" : ""}`}
+        role="status"
+        aria-live="polite"
+      >
+        {toast && (
+          <>
+            <Check size={17} />
+            <span>{toast}</span>
+          </>
+        )}
+      </div>
+      {customItem && (
+        <CustomizeItem
+          item={customItem}
+          onAdd={addToCart}
+          onClose={() => setCustomItem(null)}
+        />
+      )}
+      {mobileCart && (
+        <Modal title="Your café moment" onClose={() => setMobileCart(false)}>
+          <div className="mobile-cart-content">{cartContent}</div>
+        </Modal>
+      )}
+      {feedback && (
+        <Modal title="Room Vibe & Comfort" onClose={() => setFeedback(false)}>
+          <RoomFeedback table={tableNumber} />
+        </Modal>
+      )}
+      {checkout && (
+        <Modal
+          title="A final little check."
+          onClose={() => {
+            if (!placingOrder) setCheckout(false);
+          }}
+        >
+          <p className="muted checkout-intro">
+            Everything look good? We’ll send it straight to the baristas.
+          </p>
+          <div className="checkout-items">
+            {cart.map((item, index) => (
+              <div key={index}>
+                <span>
+                  <strong>
+                    {item.quantity} × {item.item_name}
+                  </strong>
+                  <small>
+                    {item.milk_choice !== "None"
+                      ? `${item.milk_choice} milk · `
+                      : ""}
+                    {item.sweetness}
+                    {item.notes ? ` · ${item.notes}` : ""}
+                  </small>
+                </span>
+                <strong>{money(item.price * item.quantity)}</strong>
+              </div>
+            ))}
+          </div>
+          <form
+            className="form-stack"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void placeOrder();
+            }}
+          >
+            <div className="checkout-table">
+              <span>Your Table</span>
+              <TableSelect value={tableNumber} onChange={setTableNumber} />
+            </div>
+            <label className="field-label">
+              Allergies &amp; dietary restrictions <span>Optional</span>
+              <input
+                value={allergies}
+                maxLength={500}
+                onChange={(event) => setAllergies(event.target.value)}
+                placeholder="For example, a nut allergy"
+                disabled={placingOrder}
+              />
+            </label>
+            <div className="checkout-total">
+              <span>Total</span>
+              <strong>{money(total)}</strong>
+            </div>
+            {orderError && (
+              <p className="notice error" role="alert">
+                {orderError}
+              </p>
+            )}
+            <button
+              disabled={placingOrder || cart.length === 0}
+              className="primary-button full-width"
+            >
+              {placingOrder ? (
+                <>
+                  <LoaderCircle size={17} className="spin" /> Sending to your
+                  barista…
+                </>
+              ) : (
+                <>
+                  Place Order · {money(total)}
+                  <ArrowRight size={17} />
+                </>
+              )}
+            </button>
+            <p className="helper-text center">
+              <Clock3 size={13} /> Your wait estimate appears after ordering.
+            </p>
+          </form>
+        </Modal>
       )}
     </div>
   );
-};
+}
