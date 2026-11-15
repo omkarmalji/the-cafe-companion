@@ -42,9 +42,18 @@ def health_check():
     }
 
 # Serve frontend build in production if available
-frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist"))
-if os.path.exists(frontend_dist):
-    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets")
+candidate_paths = [
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")),
+    "/frontend/dist",
+    "/app/frontend/dist",
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")),
+]
+frontend_dist = next((p for p in candidate_paths if os.path.exists(p)), None)
+
+if frontend_dist:
+    assets_dir = os.path.join(frontend_dist, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):

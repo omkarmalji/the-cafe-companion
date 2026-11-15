@@ -12,7 +12,6 @@ backend/cafe.db
 frontend/node_modules/
 frontend/.pnp
 frontend/.pnp.js
-frontend/dist/
 frontend/.env.local
 
 # IDEs
