@@ -3,15 +3,17 @@ set -e
 
 # ==========================================
 # Deploy The Café Companion to Google Cloud Run
+# Region: asia-south1 (Mumbai, India)
 # ==========================================
 
 SERVICE_NAME="the-cafe-companion"
-REGION="us-central1"
+REGION="asia-south1"
 PROJECT_ID="${GCP_PROJECT_ID:-the-cafe-companion}"
 
 echo "=========================================="
 echo " Deploying ${SERVICE_NAME} to Cloud Run"
-echo " Project: ${PROJECT_ID} | Region: ${REGION}"
+echo " Region: ${REGION} (Mumbai, India)"
+echo " Project: ${PROJECT_ID}"
 echo "=========================================="
 
 # Ensure project is set
@@ -25,7 +27,7 @@ gcloud services enable run.googleapis.com \
                        generativelanguage.googleapis.com
 
 # Deploy container directly from source to Cloud Run
-echo "Building container and deploying to Cloud Run..."
+echo "Building container and deploying to Cloud Run in ${REGION}..."
 gcloud run deploy "${SERVICE_NAME}" \
   --source . \
   --region "${REGION}" \

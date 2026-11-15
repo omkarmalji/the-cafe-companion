@@ -1,14 +1,16 @@
 ﻿# ==========================================
 # Deploy The Café Companion to Google Cloud Run (PowerShell)
+# Region: asia-south1 (Mumbai, India)
 # ==========================================
 
 $SERVICE_NAME = "the-cafe-companion"
-$REGION = "us-central1"
+$REGION = "asia-south1"
 $PROJECT_ID = if ($env:GCP_PROJECT_ID) { $env:GCP_PROJECT_ID } else { "the-cafe-companion" }
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host " Deploying $SERVICE_NAME to Google Cloud Run" -ForegroundColor Cyan
-Write-Host " Project: $PROJECT_ID | Region: $REGION" -ForegroundColor Cyan
+Write-Host " Region: $REGION (Mumbai, India)" -ForegroundColor Cyan
+Write-Host " Project: $PROJECT_ID" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 
 # Set active GCP project
@@ -19,7 +21,7 @@ Write-Host "Enabling Google Cloud APIs..." -ForegroundColor Yellow
 gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com generativelanguage.googleapis.com
 
 # Deploy from source
-Write-Host "Building and deploying to Cloud Run..." -ForegroundColor Yellow
+Write-Host "Building and deploying to Cloud Run in $REGION..." -ForegroundColor Yellow
 gcloud run deploy $SERVICE_NAME `
   --source . `
   --region $REGION `
